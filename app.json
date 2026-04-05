@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "serviceOS Kund",
+    "slug": "serviceos-kund",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1D9E75"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "se.serviceos.kund",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Vi behöver din plats för att hitta städare nära dig.",
+        "NSLocationAlwaysUsageDescription": "Vi behöver din plats för att spåra din städare."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1D9E75"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "se.serviceos.kund",
+      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-location",
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "merchant.se.serviceos.kund",
+          "enableGooglePay": true
+        }
+      ]
+    ]
+  }
+}
