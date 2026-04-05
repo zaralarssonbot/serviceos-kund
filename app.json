@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "serviceOS Kund",
+    "name": "serviceOS",
     "slug": "serviceos-kund",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -10,24 +10,36 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#1D9E75"
+      "backgroundColor": "#0d9488"
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "se.serviceos.kund",
+      "bundleIdentifier": "com.serviceos.kund",
+      "buildNumber": "1",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Vi behöver din plats för att hitta städare nära dig.",
-        "NSLocationAlwaysUsageDescription": "Vi behöver din plats för att spåra din städare."
-      }
+        "NSLocationWhenInUseUsageDescription": "Vi behöver din plats för att hitta städare nära dig och visa leveransadressen korrekt.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Vi delar din position för att hjälpa städaren att hitta dig.",
+        "NSLocationAlwaysUsageDescription": "Vi delar din position för att hjälpa städaren att hitta dig.",
+        "NSCameraUsageDescription": "Kameran används för att ta bilder på din bostad.",
+        "NSPhotoLibraryUsageDescription": "Åtkomst till bilder används för profilbild.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "associatedDomains": ["applinks:serviceos.app"]
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#1D9E75"
+        "backgroundColor": "#0d9488"
       },
       "edgeToEdgeEnabled": true,
-      "package": "se.serviceos.kund",
-      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
+      "package": "com.serviceos.kund",
+      "versionCode": 1,
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "VIBRATE",
+        "POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -37,10 +49,32 @@
       [
         "@stripe/stripe-react-native",
         {
-          "merchantIdentifier": "merchant.se.serviceos.kund",
+          "merchantIdentifier": "merchant.com.serviceos.kund",
           "enableGooglePay": true
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "15.1"
+          },
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "buildToolsVersion": "35.0.0"
+          }
+        }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "BYTA-UT-TILL-EAS-PROJECT-ID"
+      },
+      "privacyPolicyUrl": "https://serviceos.app/integritetspolicy",
+      "termsOfServiceUrl": "https://serviceos.app/anvandarvillkor",
+      "supportEmail": "support@serviceos.app"
+    },
+    "owner": "serviceos"
   }
 }
