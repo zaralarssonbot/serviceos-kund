@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Platform, Alert, ActivityIndicator,
+  Platform, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, { Marker } from '../lib/karta';
+import { Alert } from '../lib/alert';
 import { useAuth } from '../context/AuthContext';
 import api from '../lib/api';
 

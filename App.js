@@ -5,7 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Text, View, ActivityIndicator } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { StripeProvider } from '@stripe/stripe-react-native';
+import { StripeProvider } from './lib/stripe';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import HemScreen from './screens/HemScreen';

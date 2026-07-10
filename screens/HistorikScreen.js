@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Modal, TextInput, Alert,
+  ActivityIndicator, RefreshControl, Modal, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Alert } from '../lib/alert';
 import { useAuth } from '../context/AuthContext';
 import api, { hämtaMinaBokningar } from '../lib/api';
 

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator,
-  Linking, Alert, Platform,
+  Linking, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
-import * as SMS from 'expo-sms';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from '../lib/karta';
+import * as SMS from '../lib/sms';
+import { Alert } from '../lib/alert';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { hämtaBokning, hämtaWorker, WS_URL } from '../lib/api';
 

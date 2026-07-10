@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  TextInput, Switch, Alert, ActivityIndicator,
+  TextInput, Switch, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Alert } from '../lib/alert';
 import { useAuth } from '../context/AuthContext';
 import { uppdateraKund } from '../lib/api';
 

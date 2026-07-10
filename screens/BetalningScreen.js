@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  ActivityIndicator, Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useStripe } from '@stripe/stripe-react-native';
+import { useStripe } from '../lib/stripe';
+import { Alert } from '../lib/alert';
 import { skapaPaymentIntent } from '../lib/api';
 
 const TEAL = '#1D9E75';
