@@ -1,46 +1,81 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { BASE_URL } from '../lib/api';
+import {
+  NYCKLAR, hämtaProfil, sättUtloggadLyssnare, uppdateraProfil, verifieraKod,
+} from '../lib/api';
 
 const AuthContext = createContext(null);
 
+/**
+ * `kund` = profilen från GET /api/kunder/mig:
+ * { kund_id, fornamn, efternamn, email, telefon, gatuadress, postnummer, stad,
+ *   har_personnummer, villkor_godkanda }
+ */
 export function AuthProvider({ children }) {
   const [kund, setKund] = useState(null);
   const [laddar, setLaddar] = useState(true);
 
+  const sparaKund = useCallback(async (data) => {
+    setKund(data);
+    if (data) await AsyncStorage.setItem(NYCKLAR.data, JSON.stringify(data));
+  }, []);
+
+  const loggaUt = useCallback(async () => {
+    await AsyncStorage.multiRemove(Object.values(NYCKLAR));
+    setKund(null);
+  }, []);
+
   useEffect(() => {
+    sättUtloggadLyssnare(() => setKund(null));
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem('kund_data');
+        const token = await AsyncStorage.getItem(NYCKLAR.token);
+        if (!token) return;
+        // Visa sparad profil direkt, uppdatera i bakgrunden.
+        const raw = await AsyncStorage.getItem(NYCKLAR.data);
         if (raw) setKund(JSON.parse(raw));
+        try {
+          await sparaKund(await hämtaProfil());
+        } catch (e) {
+          if (e?.response?.status === 401 || e?.response?.status === 403) await loggaUt();
+        }
       } finally {
         setLaddar(false);
       }
     })();
+    return () => sättUtloggadLyssnare(null);
+  }, [sparaKund, loggaUt]);
+
+  /** Steg 2 i inloggningen. Returnerar { ny_kund, profil } så att LoginScreen kan be om namn. */
+  const loggaInMedKod = useCallback(async (telefon, kod) => {
+    const svar = await verifieraKod(telefon, kod);
+    await AsyncStorage.multiSet([
+      [NYCKLAR.token, svar.access_token],
+      [NYCKLAR.refresh, svar.refresh_token],
+    ]);
+    const profil = await hämtaProfil();
+    return { svar, profil };
   }, []);
 
-  const loggaIn = useCallback(async (email, lösenord) => {
-    const form = new URLSearchParams();
-    form.append('username', email);
-    form.append('password', lösenord);
-    const r = await axios.post(`${BASE_URL}/api/auth/login`, form.toString(), {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
-    await AsyncStorage.setItem('kund_token', r.data.access_token);
-    const kundData = { email, ...r.data };
-    await AsyncStorage.setItem('kund_data', JSON.stringify(kundData));
-    setKund(kundData);
-    return kundData;
-  }, []);
+  /** Släpper in kunden i appen (anropas när ev. namn-steget är klart). */
+  const slutförInloggning = useCallback(async (profil) => {
+    await sparaKund(profil);
+  }, [sparaKund]);
 
-  const loggaUt = useCallback(async () => {
-    await AsyncStorage.multiRemove(['kund_token', 'kund_data']);
-    setKund(null);
-  }, []);
+  const uppdatera = useCallback(async (data) => {
+    const profil = await uppdateraProfil(data);
+    await sparaKund(profil);
+    return profil;
+  }, [sparaKund]);
+
+  const laddaOmProfil = useCallback(async () => {
+    try { await sparaKund(await hämtaProfil()); } catch { /* behåll cache */ }
+  }, [sparaKund]);
 
   return (
-    <AuthContext.Provider value={{ kund, laddar, loggaIn, loggaUt }}>
+    <AuthContext.Provider
+      value={{ kund, laddar, loggaInMedKod, slutförInloggning, uppdatera, laddaOmProfil, loggaUt }}
+    >
       {children}
     </AuthContext.Provider>
   );

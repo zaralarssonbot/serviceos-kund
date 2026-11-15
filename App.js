@@ -5,9 +5,11 @@ import { StatusBar } from 'expo-status-bar';
 import { Text, View, ActivityIndicator } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { StripeProvider } from '@stripe/stripe-react-native';
+import { StripeProvider } from './lib/stripe';
 
+import { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { hämtaConfig } from './lib/api';
 import HemScreen from './screens/HemScreen';
 import BokningScreen from './screens/BokningScreen';
 import BetalningScreen from './screens/BetalningScreen';
@@ -101,10 +103,22 @@ function LoginStack() {
 }
 
 export default function App() {
+  // Stripe-nyckeln hämtas från backend (GET /api/bokningar/config) i stället för att hårdkodas.
+  const [stripeKey, setStripeKey] = useState(null);
+  useEffect(() => { hämtaConfig().then((c) => setStripeKey(c.stripeKey || '')); }, []);
+
+  if (stripeKey === null) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+        <ActivityIndicator size="large" color={TEAL} />
+      </View>
+    );
+  }
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <StripeProvider publishableKey="pk_test_placeholder_replace_with_real_key">
+        <StripeProvider publishableKey={stripeKey || 'pk_test_ej_konfigurerad'} urlScheme="serviceos-kund">
           <AuthProvider>
             <StatusBar style="dark" />
             <AppNavigator />

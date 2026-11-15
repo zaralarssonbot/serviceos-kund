@@ -1,319 +1,165 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator,
-  Linking, Alert, Platform,
+  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
-import * as SMS from 'expo-sms';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { hämtaBokning, hämtaWorker, WS_URL } from '../lib/api';
+import MapView, { Marker } from '../lib/karta';
+import { felText, hämtaBokning, hämtaStatus } from '../lib/api';
+import { TEAL } from '../lib/tjanster';
 
-const TEAL = '#1D9E75';
+const POLL_MS = 10000;
+const STEG = ['Tilldelad', 'På väg', 'Framme', 'Städar', 'Klar'];
 
-const STEG = [
-  { status: 'OBOKAD',    etikett: 'Bokad',    ikon: '📋' },
-  { status: 'TILLDELAD', etikett: 'På väg',   ikon: '🚗' },
-  { status: 'PAGAENDE',  etikett: 'Anlänt',   ikon: '🏠' },
-  { status: 'KLAR',      etikett: 'Pågår',    ikon: '🧹' },
-  // KLAR är slutsteget
-];
-
-function ProgressBar({ status }) {
-  const aktiv = STEG.findIndex(s => s.status === status);
+function Stegindikator({ stage }) {
   return (
-    <View style={tr.progressContainer}>
-      {STEG.map((steg, i) => (
-        <View key={steg.status} style={{ alignItems: 'center', flex: 1 }}>
-          <View style={[tr.progressPunkt, i <= aktiv && tr.progressPunktAktiv]}>
-            <Text style={{ fontSize: 14 }}>{steg.ikon}</Text>
+    <View style={tr.stegRad}>
+      {STEG.map((namn, i) => {
+        const klar = i < stage;
+        return (
+          <View key={namn} style={{ alignItems: 'center', flex: 1 }}>
+            <View style={[tr.prick, klar && tr.prickKlar]} />
+            <Text style={[tr.stegText, klar && { color: TEAL, fontWeight: '700' }]}>{namn}</Text>
           </View>
-          <Text style={[tr.progressText, i <= aktiv && { color: TEAL, fontWeight: '700' }]}>
-            {steg.etikett}
-          </Text>
-          {i < STEG.length - 1 && (
-            <View style={[tr.progressLinje, i < aktiv && tr.progressLinjeAktiv]} />
-          )}
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
 
-function WorkerKort({ worker, telefon, onRing, onSMS }) {
-  return (
-    <View style={tr.workerKort}>
-      <View style={tr.workerAvatar}>
-        <Text style={{ fontSize: 28 }}>👷</Text>
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={tr.workerNamn}>
-          {worker ? `${worker.fornamn} ${worker.efternamn}` : 'Tilldelar städare…'}
-        </Text>
-        {worker?.snittbetyg && (
-          <Text style={tr.workerBetyg}>
-            ⭐ {worker.snittbetyg.toFixed(1)} · {worker.antal_reviews ?? 0} recensioner
-          </Text>
-        )}
-      </View>
-      {worker && (
-        <View style={{ flexDirection: 'row', gap: 10 }}>
-          <TouchableOpacity style={tr.kontaktBtn} onPress={onRing}>
-            <Text style={{ fontSize: 20 }}>📞</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={tr.kontaktBtn} onPress={onSMS}>
-            <Text style={{ fontSize: 20 }}>💬</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-    </View>
-  );
-}
-
+/**
+ * Följer en bokning via GET /api/bokningar/{id}/status (pollas var 10:e s).
+ * Backend visar bara riktig data — utan tilldelad städare är `worker` null.
+ */
 export default function TrackingScreen({ navigation, route }) {
   const bokningId = route?.params?.bokningId;
+  const [status, setStatus] = useState(null);
   const [bokning, setBokning] = useState(null);
-  const [worker, setWorker] = useState(null);
-  const [workerPos, setWorkerPos] = useState(null);
-  const [ansluten, setAnsluten] = useState(false);
-  const [laddar, setLaddar] = useState(true);
-  const wsRef = useRef(null);
-  const reconnRef = useRef(null);
-  const monterad = useRef(true);
-  const kartRef = useRef(null);
+  const [fel, setFel] = useState('');
+  const timer = useRef(null);
 
-  // Hämta initial bokningsdata
-  useEffect(() => {
-    if (!bokningId) return;
-    (async () => {
-      try {
-        const b = await hämtaBokning(bokningId);
-        setBokning(b);
-        if (b.worker_id) {
-          const w = await hämtaWorker(b.worker_id);
-          setWorker(w);
-        }
-      } catch { /* tyst */ }
-      finally { setLaddar(false); }
-    })();
-  }, [bokningId]);
-
-  // WebSocket-anslutning
-  const anslutWS = useCallback(async () => {
-    if (!monterad.current || !bokningId) return;
-    const token = await AsyncStorage.getItem('kund_token');
-    if (!token) return;
-
-    const ws = new WebSocket(
-      `${WS_URL}/api/ws/kund/${bokningId}?token=${encodeURIComponent(token)}`
-    );
-    wsRef.current = ws;
-
-    ws.onopen = () => { if (monterad.current) setAnsluten(true); };
-
-    ws.onmessage = (e) => {
-      if (!monterad.current) return;
-      try {
-        const data = JSON.parse(e.data);
-        if (data.type === 'position' && data.lat && data.lng) {
-          const pos = { latitude: data.lat, longitude: data.lng };
-          setWorkerPos(pos);
-          kartRef.current?.animateToRegion({ ...pos, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 600);
-        }
-        if (data.type === 'status_update') {
-          setBokning(prev => prev ? { ...prev, status: data.status } : prev);
-          if (data.worker_id && !worker) {
-            hämtaWorker(data.worker_id).then(setWorker).catch(() => {});
-          }
-        }
-        if (data.type === 'klar') {
-          Alert.alert(
-            'Städningen är klar! 🎉',
-            'Vänligen lämna en recension.',
-            [
-              { text: 'Lämna recension', onPress: () => navigation.navigate('Historik') },
-              { text: 'Stäng', style: 'cancel' },
-            ]
-          );
-        }
-      } catch { /* ignorera parse-fel */ }
-    };
-
-    ws.onclose = (e) => {
-      if (!monterad.current) return;
-      setAnsluten(false);
-      if (e.code !== 1000) {
-        reconnRef.current = setTimeout(() => anslutWS(), 4000);
-      }
-    };
-
-    ws.onerror = () => { if (monterad.current) setAnsluten(false); };
-  }, [bokningId]);
-
-  useEffect(() => {
-    monterad.current = true;
-    anslutWS();
-    return () => {
-      monterad.current = false;
-      clearTimeout(reconnRef.current);
-      wsRef.current?.close(1000, 'Skärm stängd');
-    };
-  }, [anslutWS]);
-
-  async function hanteraRing() {
-    if (!worker?.telefon) return;
-    Linking.openURL(`tel:${worker.telefon}`);
-  }
-
-  async function hanteraSMS() {
-    const tillgänglig = await SMS.isAvailableAsync();
-    if (tillgänglig && worker?.telefon) {
-      await SMS.sendSMSAsync([worker.telefon], 'Hej! Jag är kunden för din nuvarande städning.');
-    } else {
-      Alert.alert('SMS ej tillgängligt på denna enhet');
+  const hämta = useCallback(async () => {
+    try {
+      setStatus(await hämtaStatus(bokningId));
+      setFel('');
+    } catch (e) {
+      setFel(felText(e, 'Kunde inte hämta status.'));
     }
-  }
+  }, [bokningId]);
 
-  const startRegion = workerPos
-    ? { ...workerPos, latitudeDelta: 0.01, longitudeDelta: 0.01 }
-    : { latitude: 59.3293, longitude: 18.0686, latitudeDelta: 0.05, longitudeDelta: 0.05 };
+  useEffect(() => {
+    if (!bokningId) return undefined;
+    hämtaBokning(bokningId).then(setBokning).catch(() => {});
+    hämta();
+    timer.current = setInterval(hämta, POLL_MS);
+    return () => clearInterval(timer.current);
+  }, [bokningId, hämta]);
 
-  if (laddar) {
-    return (
-      <SafeAreaView style={tr.safe}>
-        <ActivityIndicator size="large" color={TEAL} style={{ flex: 1 }} />
-      </SafeAreaView>
-    );
-  }
+  useEffect(() => {
+    if (status?.is_done) clearInterval(timer.current);
+  }, [status?.is_done]);
 
-  if (!bokningId) {
-    return (
-      <SafeAreaView style={tr.safe}>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: '#6B7280' }}>Ingen aktiv bokning</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const kund = status?.kund_lat != null && status?.kund_lng != null
+    ? { latitude: status.kund_lat, longitude: status.kund_lng } : null;
+  const städarPos = status?.worker_start_lat != null && status?.worker_start_lng != null
+    ? { latitude: status.worker_start_lat, longitude: status.worker_start_lng } : null;
+  const worker = status?.worker;
+
+  const region = kund ? {
+    ...kund,
+    latitudeDelta: städarPos ? Math.max(Math.abs(kund.latitude - städarPos.latitude) * 2.5, 0.01) : 0.01,
+    longitudeDelta: städarPos ? Math.max(Math.abs(kund.longitude - städarPos.longitude) * 2.5, 0.01) : 0.01,
+  } : null;
 
   return (
-    <View style={{ flex: 1 }}>
-      {/* Karta */}
-      <MapView
-        ref={kartRef}
-        style={tr.karta}
-        provider={PROVIDER_GOOGLE}
-        initialRegion={startRegion}
-        showsUserLocation
-        showsMyLocationButton
-      >
-        {workerPos && (
-          <Marker coordinate={workerPos} title="Din städare">
-            <View style={tr.städarMarker}>
-              <Text style={{ fontSize: 22 }}>🧹</Text>
-            </View>
-          </Marker>
-        )}
-      </MapView>
-
-      {/* Live-indikator */}
-      <View style={tr.liveBadge}>
-        <View style={[tr.livePunkt, !ansluten && { backgroundColor: '#EF4444' }]} />
-        <Text style={tr.liveText}>{ansluten ? 'Live' : 'Ansluter…'}</Text>
-      </View>
-
-      {/* Tillbaka-knapp */}
-      <TouchableOpacity style={tr.backBtn} onPress={() => navigation.goBack()}>
-        <Text style={{ fontSize: 16, color: '#1A1A2E' }}>‹</Text>
-      </TouchableOpacity>
-
-      {/* Bottenkort */}
-      <SafeAreaView edges={['bottom']} style={tr.bottenKort}>
-        {/* Status-rubrik */}
-        <View style={tr.statusRad}>
-          <Text style={tr.statusText}>
-            {bokning?.status === 'TILLDELAD' ? '🚗 Din städare är på väg' :
-             bokning?.status === 'PAGAENDE'  ? '🧹 Städning pågår' :
-             bokning?.status === 'KLAR'      ? '✅ Städning klar!' :
-             '📋 Bokning bekräftad'}
-          </Text>
-          <Text style={tr.bokningId}>#{bokningId?.toString().slice(0, 8)}</Text>
+    <View style={tr.container}>
+      {region ? (
+        <MapView style={StyleSheet.absoluteFill} region={region}>
+          <Marker coordinate={kund} title="Din adress" pinColor={TEAL} />
+          {städarPos && <Marker coordinate={städarPos} title={worker?.namn ?? 'Städaren'}><Text style={{ fontSize: 28 }}>🧹</Text></Marker>}
+        </MapView>
+      ) : (
+        <View style={[StyleSheet.absoluteFill, tr.kartaSaknas]}>
+          <Text style={{ fontSize: 48 }}>🗺️</Text>
         </View>
+      )}
 
-        {/* Progress */}
-        <ProgressBar status={bokning?.status} />
-
-        {/* Worker-info */}
-        <WorkerKort
-          worker={worker}
-          onRing={hanteraRing}
-          onSMS={hanteraSMS}
-        />
+      <SafeAreaView edges={['top']} style={tr.topp}>
+        <TouchableOpacity style={tr.tillbaka} onPress={() => navigation.goBack()} accessibilityLabel="Tillbaka">
+          <Text style={{ fontSize: 18 }}>‹</Text>
+        </TouchableOpacity>
       </SafeAreaView>
+
+      <View style={tr.panel}>
+        {!status && !fel && <ActivityIndicator color={TEAL} />}
+        {!!fel && <Text style={tr.fel}>{fel}</Text>}
+        {status && (
+          <>
+            <Text style={tr.rubrik}>{status.stage_namn}</Text>
+            {status.eta_minuter > 0 && <Text style={tr.eta}>Beräknad ankomst om ca {status.eta_minuter} min</Text>}
+            {bokning && <Text style={tr.sub}>{bokning.tjanst_namn} · {bokning.datum_formaterat} kl {bokning.tid}</Text>}
+            {worker ? (
+              <>
+                <Stegindikator stage={status.stage} />
+                <View style={tr.städare}>
+                  <View style={tr.avatar}><Text style={{ fontSize: 22 }}>🧑‍🔧</Text></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={tr.namn}>{worker.namn}{worker.verifierad ? '  ✓' : ''}</Text>
+                    <Text style={tr.sub}>
+                      {worker.betyg ? `★ ${worker.betyg}` : 'Ny städare'}
+                      {worker.antal_stadningar ? ` · ${worker.antal_stadningar} städningar` : ''}
+                    </Text>
+                  </View>
+                  {!!worker.telefon && (
+                    <TouchableOpacity style={tr.ring} onPress={() => Linking.openURL(`tel:${worker.telefon}`)}>
+                      <Text style={tr.ringText}>📞 Ring</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </>
+            ) : (
+              <Text style={[tr.sub, { marginTop: 10 }]}>
+                Vi letar upp en ledig städare nära dig. Sidan uppdateras automatiskt.
+              </Text>
+            )}
+            {status.is_done && (
+              <TouchableOpacity style={tr.klarBtn} onPress={() => navigation.navigate('Historik')}>
+                <Text style={tr.klarText}>★ Betygsätt städningen</Text>
+              </TouchableOpacity>
+            )}
+          </>
+        )}
+      </View>
     </View>
   );
 }
 
 const tr = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
-  karta: { flex: 1 },
-  liveBadge: {
-    position: 'absolute', top: 56, right: 16,
-    backgroundColor: '#fff', borderRadius: 20, paddingVertical: 6, paddingHorizontal: 12,
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, elevation: 4,
-  },
-  livePunkt: {
-    width: 8, height: 8, borderRadius: 4, backgroundColor: TEAL,
-  },
-  liveText: { fontSize: 12, fontWeight: '700', color: '#1A1A2E' },
-  backBtn: {
-    position: 'absolute', top: 48, left: 16,
-    backgroundColor: '#fff', borderRadius: 20, width: 40, height: 40,
+  container: { flex: 1, backgroundColor: '#E5E7EB' },
+  kartaSaknas: { alignItems: 'center', justifyContent: 'center' },
+  topp: { position: 'absolute', top: 0, left: 16 },
+  tillbaka: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: '#fff', marginTop: 8,
     alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, elevation: 4,
+    shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 6, elevation: 4,
   },
-  städarMarker: {
-    backgroundColor: '#fff', borderRadius: 24, padding: 6,
-    shadowColor: TEAL, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.4, elevation: 6,
-    borderWidth: 2, borderColor: TEAL,
+  panel: {
+    position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: '#fff',
+    borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 12, elevation: 10,
   },
-  bottenKort: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    paddingHorizontal: 20, paddingTop: 16,
-    shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.08, elevation: 10,
-  },
-  statusRad: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  statusText: { fontSize: 17, fontWeight: '700', color: '#1A1A2E' },
-  bokningId: { fontSize: 12, color: '#9CA3AF', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
-  progressContainer: { flexDirection: 'row', marginBottom: 16, position: 'relative' },
-  progressPunkt: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: '#E5E7EB',
-  },
-  progressPunktAktiv: { backgroundColor: TEAL + '20', borderColor: TEAL },
-  progressText: { fontSize: 10, color: '#9CA3AF', marginTop: 4, textAlign: 'center' },
-  progressLinje: {
-    position: 'absolute', top: 17, right: -4, width: '100%', height: 2,
-    backgroundColor: '#E5E7EB', zIndex: -1,
-  },
-  progressLinjeAktiv: { backgroundColor: TEAL },
-  workerKort: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: '#F9FAFB', borderRadius: 16, padding: 16, marginBottom: 8,
-  },
-  workerAvatar: {
-    width: 52, height: 52, borderRadius: 26,
-    backgroundColor: TEAL + '20', alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: TEAL + '40',
-  },
-  workerNamn: { fontSize: 16, fontWeight: '700', color: '#1A1A2E' },
-  workerBetyg: { fontSize: 13, color: '#6B7280', marginTop: 2 },
-  kontaktBtn: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, borderColor: '#E5E7EB',
-  },
+  rubrik: { fontSize: 20, fontWeight: '800', color: '#1A1A2E' },
+  eta: { fontSize: 15, color: TEAL, fontWeight: '700', marginTop: 4 },
+  sub: { fontSize: 13, color: '#6B7280', marginTop: 4, lineHeight: 19 },
+  fel: { color: '#DC2626' },
+  stegRad: { flexDirection: 'row', marginTop: 18 },
+  prick: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#E5E7EB', marginBottom: 6 },
+  prickKlar: { backgroundColor: TEAL },
+  stegText: { fontSize: 11, color: '#9CA3AF' },
+  städare: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 18, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  avatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#F0FBF7', alignItems: 'center', justifyContent: 'center' },
+  namn: { fontSize: 16, fontWeight: '700', color: '#1A1A2E' },
+  ring: { backgroundColor: TEAL + '15', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14 },
+  ringText: { color: TEAL, fontWeight: '700' },
+  klarBtn: { backgroundColor: TEAL, borderRadius: 12, padding: 15, alignItems: 'center', marginTop: 18 },
+  klarText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });

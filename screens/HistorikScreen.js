@@ -1,91 +1,55 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Modal, TextInput, Alert,
+  View, Text, SectionList, TouchableOpacity, StyleSheet, ActivityIndicator,
+  RefreshControl, Modal, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAuth } from '../context/AuthContext';
-import api, { hämtaMinaBokningar } from '../lib/api';
+import { useFocusEffect } from '@react-navigation/native';
+import { Alert } from '../lib/alert';
+import { avbokaBokning, betygsättBokning, felText, hämtaMinaBokningar } from '../lib/api';
+import { STATUS_FÄRG, TEAL, kr, tjänstInfo } from '../lib/tjanster';
 
-const TEAL = '#1D9E75';
+const SPÅRBARA = new Set(['tilldelad', 'pa_vag', 'framme', 'pagar']);
 
-const STATUS_ETIKETT = {
-  OBOKAD: 'Obokad', TILLDELAD: 'Tilldelad', PAGAENDE: 'Pågående',
-  KLAR: 'Klar', FAKTURERAD: 'Fakturerad', BETALD: 'Betald',
-};
-const STATUS_FÄRG = {
-  OBOKAD: '#6B7280', TILLDELAD: '#3B82F6', PAGAENDE: '#F59E0B',
-  KLAR: '#10B981', FAKTURERAD: '#8B5CF6', BETALD: '#10B981',
-};
-const TYP_ETIKETT = { STADNING: 'Hemstädning', OMSORG: 'Kontorsstädning', LOGISTIK: 'Flyttstädning' };
-
-function StarVäljare({ värde, onVälj }) {
-  return (
-    <View style={{ flexDirection: 'row', gap: 8, marginVertical: 12 }}>
-      {[1, 2, 3, 4, 5].map(n => (
-        <TouchableOpacity key={n} onPress={() => onVälj(n)}>
-          <Text style={{ fontSize: 32 }}>{n <= värde ? '⭐' : '☆'}</Text>
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
-}
-
-function ReviewModal({ synlig, bokning, onStäng, onSpara }) {
+function BetygModal({ bokning, onStäng, onSparad }) {
   const [betyg, setBetyg] = useState(5);
   const [kommentar, setKommentar] = useState('');
   const [sparar, setSparar] = useState(false);
 
-  async function hanteraSave() {
+  async function spara() {
     setSparar(true);
     try {
-      await onSpara(bokning.id, betyg, kommentar);
-      onStäng();
-    } catch {
-      Alert.alert('Fel', 'Kunde inte spara recension');
+      await betygsättBokning(bokning.booking_id, betyg, kommentar.trim());
+      onSparad();
+    } catch (e) {
+      Alert.alert('Kunde inte spara', felText(e));
     } finally {
       setSparar(false);
     }
   }
 
   return (
-    <Modal visible={synlig} animationType="slide" presentationStyle="pageSheet" onRequestClose={onStäng}>
+    <Modal visible={!!bokning} animationType="slide" presentationStyle="pageSheet" onRequestClose={onStäng}>
       <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
         <View style={rv.container}>
           <View style={rv.headerRad}>
-            <Text style={rv.rubrik}>Lämna recension</Text>
-            <TouchableOpacity onPress={onStäng} style={rv.stängBtn}>
+            <Text style={rv.rubrik}>Hur blev det?</Text>
+            <TouchableOpacity onPress={onStäng} style={rv.stängBtn} accessibilityLabel="Stäng">
               <Text style={{ fontSize: 16, color: '#6B7280' }}>✕</Text>
             </TouchableOpacity>
           </View>
-
-          <Text style={rv.sub}>
-            {TYP_ETIKETT[bokning?.typ] ?? bokning?.typ}
-            {bokning?.startdatum ? ` · ${new Date(bokning.startdatum).toLocaleDateString('sv-SE')}` : ''}
-          </Text>
-
-          <Text style={rv.etikett}>Hur var städningen?</Text>
-          <StarVäljare värde={betyg} onVälj={setBetyg} />
-
-          <Text style={rv.etikett}>Kommentar (valfri)</Text>
-          <TextInput
-            style={rv.input}
-            multiline
-            numberOfLines={4}
-            placeholder="Berätta om din upplevelse…"
-            value={kommentar}
-            onChangeText={setKommentar}
-            placeholderTextColor="#9CA3AF"
-          />
-
-          <TouchableOpacity
-            style={[rv.btn, sparar && { opacity: 0.6 }]}
-            onPress={hanteraSave}
-            disabled={sparar}
-          >
-            {sparar
-              ? <ActivityIndicator color="#fff" />
-              : <Text style={rv.btnText}>Skicka recension</Text>}
+          <Text style={rv.sub}>{bokning?.tjanst_namn} · {bokning?.datum_formaterat}</Text>
+          <View style={{ flexDirection: 'row', gap: 8, marginVertical: 16 }}>
+            {[1, 2, 3, 4, 5].map((n) => (
+              <TouchableOpacity key={n} onPress={() => setBetyg(n)} accessibilityLabel={`${n} stjärnor`}>
+                <Text style={{ fontSize: 36, color: n <= betyg ? '#F59E0B' : '#D1D5DB' }}>★</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TextInput style={rv.input} multiline placeholder="Kommentar (valfri)" value={kommentar}
+            onChangeText={setKommentar} placeholderTextColor="#9CA3AF" />
+          <TouchableOpacity style={[rv.btn, sparar && { opacity: 0.6 }]} onPress={spara} disabled={sparar}>
+            {sparar ? <ActivityIndicator color="#fff" /> : <Text style={rv.btnText}>Skicka betyg</Text>}
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -93,50 +57,51 @@ function ReviewModal({ synlig, bokning, onStäng, onSpara }) {
   );
 }
 
-function BokningKort({ bokning, onReview, onTracking }) {
-  const klickbar = bokning.status === 'TILLDELAD' || bokning.status === 'PAGAENDE';
-  const kanReviewas = bokning.status === 'KLAR' || bokning.status === 'BETALD';
-
+function BokningKort({ bokning, onBetala, onSpåra, onAvboka, onBetyg }) {
+  const färg = STATUS_FÄRG[bokning.status_farg] ?? '#6B7280';
+  const ikon = tjänstInfo(bokning.tjanst).ikon;
+  const slutförd = bokning.status === 'slutford';
   return (
     <View style={h.kort}>
       <View style={h.kortHeader}>
-        <View style={h.ikonBakgrund}>
-          <Text style={{ fontSize: 22 }}>
-            {bokning.typ === 'STADNING' ? '🏠' : bokning.typ === 'OMSORG' ? '🏢' : '📦'}
-          </Text>
-        </View>
+        <View style={h.ikonBakgrund}><Text style={{ fontSize: 22 }}>{ikon}</Text></View>
         <View style={{ flex: 1 }}>
-          <Text style={h.typ}>{TYP_ETIKETT[bokning.typ] ?? bokning.typ}</Text>
-          <Text style={h.datum}>
-            {bokning.startdatum
-              ? new Date(bokning.startdatum).toLocaleDateString('sv-SE', {
-                  weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
-                })
-              : '—'}
-          </Text>
+          <Text style={h.typ}>{bokning.tjanst_namn}</Text>
+          <Text style={h.datum}>{bokning.datum_formaterat} · {bokning.tid}</Text>
         </View>
-        <View style={[h.badge, { backgroundColor: (STATUS_FÄRG[bokning.status] ?? '#6B7280') + '20' }]}>
-          <Text style={[h.badgeText, { color: STATUS_FÄRG[bokning.status] ?? '#6B7280' }]}>
-            {STATUS_ETIKETT[bokning.status] ?? bokning.status}
-          </Text>
+        <View style={[h.badge, { backgroundColor: färg + '20' }]}>
+          <Text style={[h.badgeText, { color: färg }]}>{bokning.status_label}</Text>
         </View>
       </View>
 
-      {bokning.pris_exkl_moms && (
-        <Text style={h.pris}>
-          {Number(bokning.pris_exkl_moms).toLocaleString('sv-SE', { maximumFractionDigits: 0 })} kr exkl. moms
-        </Text>
-      )}
+      <Text style={h.detalj}>📍 {bokning.gatuadress}, {bokning.stad}</Text>
+      {bokning.stadare?.namn ? <Text style={h.detalj}>🧑‍🔧 {bokning.stadare.namn}</Text> : null}
+      <Text style={h.pris}>
+        {kr(bokning.belopp_att_betala)}{bokning.rut_avdrag > 0 ? ' efter RUT' : ''}
+      </Text>
 
-      <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-        {klickbar && (
-          <TouchableOpacity style={h.spårBtn} onPress={() => onTracking(bokning)}>
-            <Text style={h.spårBtnText}>📍 Spåra städaren</Text>
+      <View style={h.knappRad}>
+        {bokning.status === 'vantar_betalning' && (
+          <TouchableOpacity style={h.primärBtn} onPress={() => onBetala(bokning)}>
+            <Text style={h.primärText}>Betala</Text>
           </TouchableOpacity>
         )}
-        {kanReviewas && (
-          <TouchableOpacity style={h.reviewBtn} onPress={() => onReview(bokning)}>
-            <Text style={h.reviewBtnText}>⭐ Lämna recension</Text>
+        {SPÅRBARA.has(bokning.status) && (
+          <TouchableOpacity style={h.primärBtn} onPress={() => onSpåra(bokning)}>
+            <Text style={h.primärText}>📍 Följ städaren</Text>
+          </TouchableOpacity>
+        )}
+        {slutförd && !bokning.betygsatt && (
+          <TouchableOpacity style={h.primärBtn} onPress={() => onBetyg(bokning)}>
+            <Text style={h.primärText}>★ Betygsätt</Text>
+          </TouchableOpacity>
+        )}
+        {slutförd && bokning.betygsatt ? (
+          <Text style={h.betyg}>{'★'.repeat(bokning.betygsatt)}</Text>
+        ) : null}
+        {bokning.ar_kommande && !SPÅRBARA.has(bokning.status) && (
+          <TouchableOpacity style={h.sekundärBtn} onPress={() => onAvboka(bokning)}>
+            <Text style={h.sekundärText}>Avboka</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -145,73 +110,80 @@ function BokningKort({ bokning, onReview, onTracking }) {
 }
 
 export default function HistorikScreen({ navigation }) {
-  const { kund } = useAuth();
-  const [bokningar, setBokningar] = useState([]);
+  const [data, setData] = useState({ kommande: [], tidigare: [] });
   const [laddar, setLaddar] = useState(true);
   const [uppdaterar, setUppdaterar] = useState(false);
-  const [reviewBokning, setReviewBokning] = useState(null);
+  const [fel, setFel] = useState('');
+  const [betygBokning, setBetygBokning] = useState(null);
 
   const hämta = useCallback(async () => {
-    if (!kund?.id) return;
     try {
-      const data = await hämtaMinaBokningar(kund.id);
-      setBokningar(data);
-    } catch { /* tyst */ }
-    finally { setLaddar(false); setUppdaterar(false); }
-  }, [kund?.id]);
+      setData(await hämtaMinaBokningar());
+      setFel('');
+    } catch (e) {
+      setFel(felText(e, 'Kunde inte hämta bokningar.'));
+    } finally {
+      setLaddar(false);
+      setUppdaterar(false);
+    }
+  }, []);
 
-  useEffect(() => { hämta(); }, [hämta]);
+  useFocusEffect(useCallback(() => { hämta(); }, [hämta]));
 
-  async function sparaReview(jobbId, betyg, kommentar) {
-    await api.post('/api/reviews', { jobb_id: jobbId, betyg, kommentar });
-    Alert.alert('Tack!', 'Din recension har sparats.');
-    await hämta();
+  function avboka(bokning) {
+    Alert.alert('Avboka städningen?', `${bokning.tjanst_namn}, ${bokning.datum_formaterat} kl ${bokning.tid}`, [
+      { text: 'Behåll', style: 'cancel' },
+      {
+        text: 'Avboka', style: 'destructive', onPress: async () => {
+          try { await avbokaBokning(bokning.booking_id); hämta(); } catch (e) { Alert.alert('Kunde inte avboka', felText(e)); }
+        },
+      },
+    ]);
   }
 
+  const sektioner = [
+    { titel: 'Kommande', data: data.kommande },
+    { titel: 'Tidigare', data: data.tidigare },
+  ].filter((s) => s.data.length > 0);
+
   if (laddar) {
-    return (
-      <SafeAreaView style={h.safe}>
-        <ActivityIndicator size="large" color={TEAL} style={{ flex: 1 }} />
-      </SafeAreaView>
-    );
+    return <SafeAreaView style={h.safe}><ActivityIndicator size="large" color={TEAL} style={{ flex: 1 }} /></SafeAreaView>;
   }
 
   return (
-    <SafeAreaView style={h.safe}>
-      <ReviewModal
-        synlig={!!reviewBokning}
-        bokning={reviewBokning}
-        onStäng={() => setReviewBokning(null)}
-        onSpara={sparaReview}
-      />
-
-      <FlatList
-        data={bokningar}
-        keyExtractor={item => item.id?.toString()}
+    <SafeAreaView style={h.safe} edges={['top']}>
+      <BetygModal bokning={betygBokning} onStäng={() => setBetygBokning(null)}
+        onSparad={() => { setBetygBokning(null); hämta(); }} />
+      <SectionList
+        sections={sektioner}
+        keyExtractor={(item) => item.booking_id}
         contentContainerStyle={h.lista}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={uppdaterar}
-            onRefresh={() => { setUppdaterar(true); hämta(); }}
-            tintColor={TEAL}
-          />
-        }
+        stickySectionHeadersEnabled={false}
+        refreshControl={<RefreshControl refreshing={uppdaterar} tintColor={TEAL}
+          onRefresh={() => { setUppdaterar(true); hämta(); }} />}
         ListHeaderComponent={
-          <Text style={h.rubrik}>Mina bokningar</Text>
+          <>
+            <Text style={h.rubrik}>Mina bokningar</Text>
+            {!!fel && <Text style={h.fel}>{fel}</Text>}
+          </>
         }
+        renderSectionHeader={({ section }) => <Text style={h.sektion}>{section.titel}</Text>}
         ListEmptyComponent={
           <View style={h.tom}>
             <Text style={{ fontSize: 48 }}>🧹</Text>
             <Text style={h.tomText}>Inga bokningar ännu</Text>
-            <Text style={h.tomSub}>Boka din första städning via fliken Boka</Text>
+            <TouchableOpacity style={[h.primärBtn, { marginTop: 16 }]} onPress={() => navigation.navigate('Boka')}>
+              <Text style={h.primärText}>Boka din första städning</Text>
+            </TouchableOpacity>
           </View>
         }
         renderItem={({ item }) => (
           <BokningKort
             bokning={item}
-            onReview={setReviewBokning}
-            onTracking={(b) => navigation.navigate('Hem', { screen: 'Tracking', params: { bokningId: b.id } })}
+            onBetala={(b) => navigation.navigate('Betalning', { bokning: b })}
+            onSpåra={(b) => navigation.navigate('Hem', { screen: 'Tracking', params: { bokningId: b.booking_id } })}
+            onAvboka={avboka}
+            onBetyg={setBetygBokning}
           />
         )}
       />
@@ -222,50 +194,38 @@ export default function HistorikScreen({ navigation }) {
 const h = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#F9FAFB' },
   lista: { paddingHorizontal: 20, paddingBottom: 32 },
-  rubrik: { fontSize: 24, fontWeight: '800', color: '#1A1A2E', marginTop: 16, marginBottom: 20 },
+  rubrik: { fontSize: 24, fontWeight: '800', color: '#1A1A2E', marginTop: 16, marginBottom: 8 },
+  sektion: { fontSize: 13, fontWeight: '700', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 16, marginBottom: 10 },
+  fel: { color: '#DC2626', marginBottom: 8 },
   kort: {
-    backgroundColor: '#fff', borderRadius: 16, padding: 18, marginBottom: 14,
+    backgroundColor: '#fff', borderRadius: 16, padding: 18, marginBottom: 12,
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, elevation: 3,
   },
-  kortHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  ikonBakgrund: {
-    width: 48, height: 48, borderRadius: 24,
-    backgroundColor: '#F0FBF7', alignItems: 'center', justifyContent: 'center',
-  },
+  kortHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
+  ikonBakgrund: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#F0FBF7', alignItems: 'center', justifyContent: 'center' },
   typ: { fontSize: 16, fontWeight: '700', color: '#1A1A2E' },
-  datum: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  datum: { fontSize: 13, color: '#6B7280', marginTop: 2 },
   badge: { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
-  badgeText: { fontSize: 12, fontWeight: '600' },
-  pris: { fontSize: 14, color: '#6B7280', marginTop: 10 },
-  spårBtn: {
-    flex: 1, backgroundColor: TEAL + '15', borderRadius: 10,
-    paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: TEAL + '30',
-  },
-  spårBtnText: { fontSize: 13, fontWeight: '600', color: TEAL },
-  reviewBtn: {
-    flex: 1, backgroundColor: '#FFF7ED', borderRadius: 10,
-    paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: '#FED7AA',
-  },
-  reviewBtnText: { fontSize: 13, fontWeight: '600', color: '#D97706' },
-  tom: { alignItems: 'center', paddingTop: 80, gap: 12 },
-  tomText: { fontSize: 18, fontWeight: '700', color: '#1A1A2E' },
-  tomSub: { fontSize: 14, color: '#6B7280', textAlign: 'center' },
+  badgeText: { fontSize: 12, fontWeight: '700' },
+  detalj: { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  pris: { fontSize: 15, fontWeight: '700', color: '#1A1A2E', marginTop: 8 },
+  knappRad: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 12 },
+  primärBtn: { backgroundColor: TEAL, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 16 },
+  primärText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  sekundärBtn: { borderRadius: 10, paddingVertical: 10, paddingHorizontal: 16, borderWidth: 1.5, borderColor: '#E5E7EB' },
+  sekundärText: { color: '#374151', fontWeight: '600', fontSize: 14 },
+  betyg: { color: '#F59E0B', fontSize: 18 },
+  tom: { alignItems: 'center', paddingTop: 60 },
+  tomText: { fontSize: 17, fontWeight: '700', color: '#374151', marginTop: 12 },
 });
 
 const rv = StyleSheet.create({
-  container: { flex: 1, paddingHorizontal: 24, paddingTop: 8 },
-  headerRad: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  container: { flex: 1, padding: 24 },
+  headerRad: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   rubrik: { fontSize: 22, fontWeight: '800', color: '#1A1A2E' },
   stängBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' },
-  sub: { fontSize: 14, color: '#6B7280', marginBottom: 20 },
-  etikett: { fontSize: 15, fontWeight: '700', color: '#374151', marginBottom: 4 },
-  input: {
-    backgroundColor: '#F9FAFB', borderWidth: 1.5, borderColor: '#E5E7EB',
-    borderRadius: 12, padding: 14, fontSize: 15, color: '#1A1A2E',
-    minHeight: 100, textAlignVertical: 'top', marginBottom: 20,
-  },
-  btn: {
-    backgroundColor: TEAL, borderRadius: 14, paddingVertical: 16, alignItems: 'center',
-  },
-  btnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  sub: { fontSize: 14, color: '#6B7280', marginTop: 6 },
+  input: { backgroundColor: '#F9FAFB', borderWidth: 1.5, borderColor: '#E5E7EB', borderRadius: 12, padding: 14, fontSize: 15, minHeight: 100, textAlignVertical: 'top' },
+  btn: { backgroundColor: TEAL, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 20 },
+  btnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
 });
