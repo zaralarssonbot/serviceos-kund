@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -24,7 +24,9 @@
         "NSPhotoLibraryUsageDescription": "Åtkomst till bilder används för profilbild.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "associatedDomains": ["applinks:serviceos.app"]
+      "associatedDomains": [
+        "applinks:serviceos.app"
+      ]
     },
     "android": {
       "adaptiveIcon": {
@@ -77,6 +79,7 @@
       "termsOfServiceUrl": "https://serviceos.app/anvandarvillkor",
       "supportEmail": "support@serviceos.app"
     },
-    "owner": "serviceos"
+    "owner": "hersbys-team",
+    "scheme": "serviceos-kund"
   }
 }
